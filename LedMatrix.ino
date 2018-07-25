@@ -1,6 +1,9 @@
 #include "esp32_digital_led_lib.h"
 
+#include "Artnet.h"
 #include "SSD1306.h" // alias for #include "SSD1306Wire.h"
+
+#include "password.h"
 
 /*
  * Simplest possible example shows a single strand of NeoPixels. See Demo1 for multiple strands and other devices.
@@ -12,8 +15,14 @@ strand_t pStrand = {.rmtChannel = 0, .gpioNum = 16, .ledType = LED_WS2812B_V3, .
 int stepper = 0;
 int colord = 0;
 uint32_t displayData[56][24];
+int previousDataLength = 0;
+
+const int channelsPerLed = 3;
+const int startUniverse = 1; // CHANGE FOR YOUR SETUP most software this is 1, some software send out artnet first universe as 0.
+const int numLeds = 64; // change for your setup ARTNET
 
 SSD1306Wire  display(0x3c, 5, 4);
+Artnet artnet;
 
 void setup()
 {
@@ -30,11 +39,56 @@ void setup()
   
   digitalLeds_resetPixels(&pStrand);
 
+  Serial.println("Init LED : OK");
+
     // Initialising the UI will init the display too.
   display.init();
   display.setContrast(255);
   display.flipScreenVertically();
   //display.setFont(ArialMT_Plain_10);
+
+  Serial.println("Init DISPLAY : OK");
+
+  Serial.print("Init WIFI : ");
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(250);
+    Serial.print(".");
+  }
+  Serial.println(" OK");
+  Serial.print("Connected to ");
+  Serial.println(ssid);
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
+
+
+
+  artnet.begin();
+
+  artnet.setBroadcast(broadcast);
+  artnet.setArtDmxCallback(onDmxFrame);
+  artnet.setArtSyncCallback(onSync);
+  Serial.println("Init ARTNET : OK");
+}
+
+
+void onDmxFrame(uint16_t universe, uint16_t length, uint8_t sequence, uint8_t* data, IPAddress remoteIP)
+{
+  // read universe and put into the right part of the display buffer
+  for (int i = 0; i < length / channelsPerLed; i++)
+  {
+    int led = i + (universe - startUniverse) * (previousDataLength / channelsPerLed);
+    if (led < numLeds) {
+      //if (channelsPerLed == 4)
+      //  leds.setPixelColor(led, data[i * channelsPerLed], data[i * channelsPerLed + 1], data[i * channelsPerLed + 2], data[i * channelsPerLed + 3]);
+      int16_t x=led % 8;
+      int16_t y=led / 8;
+      if (channelsPerLed == 3)
+        displayData[x][y] = (data[i * channelsPerLed] << 16) +  (data[i * channelsPerLed+1] << 8) +  (data[i * channelsPerLed+2] << 0);
+        //leds.setPixelColor(led, data[i * channelsPerLed], data[i * channelsPerLed + 1], data[i * channelsPerLed + 2]);
+    }
+  }
+  previousDataLength = length;
 }
 
 uint8_t t=0;
@@ -60,7 +114,7 @@ void loop()
   //theaterChase(pixelFromRGB(127, 0, 0), 250); // Red
   //theaterChase(pixelFromRGB(0, 0, 127), 250); // Blue
 
-  plazma();
+  //plazma();
   
   display.clear();
 
@@ -88,7 +142,7 @@ void loop()
   }
   display.display();
 
-  drawSegment(2, 1, 0);
+  drawSegment(0, 0, 0);
 
   digitalLeds_updatePixels(&pStrand);
   //rainbow(t);
@@ -96,6 +150,12 @@ void loop()
   delay(20);
 
   t++;
+  artnet.read();
+}
+
+
+void onSync(IPAddress remoteIP) {
+  //leds.show();
 }
 
 void drawSegment(int x, int y, int offset) {
